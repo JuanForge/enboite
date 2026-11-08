@@ -187,7 +187,7 @@ def _main(
     if save_chat:
         if not non_interactive:
             chats: list[tuple[str, str]] = []
-            for file in Path(t.BASE_BASE).glob("chat.log*.bin"):
+            for file in sorted(Path(t.BASE_BASE).glob("chat.log*.bin"), key=lambda p: p.stat().st_mtime, reverse=True):
                 title = None
                 chat_meta = Path(os.path.join(str(t.BASE_BASE), f"{Path(file).stem}.json"))
                 if os.path.isfile(chat_meta):
