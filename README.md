@@ -15,6 +15,25 @@ pip install .[full]
 ```bash
 pip install --no-cache-dir .
 ```
+
+# Run
+## ollama
+#### fix the token shortage.
+to be adjusted according to the model's capacity
+```bash
+ollama show lfm3:1.7b --modelfile > /tmp/Modelfile
+
+sed -i '/^PARAMETER num_ctx /d' /tmp/Modelfile
+
+echo 'PARAMETER num_ctx 262144' >> /tmp/Modelfile
+
+ollama create lfm3:1.7b-256k -f /tmp/Modelfile
+```
+
+```bash
+enboite --model lfm3:1.7b-256k
+```
+
 # Arguments
 ```bash
 usage: EnBoite [-h] [--model MODEL] [--prompt PROMPT] [--prompt-file PROMPT_FILE] [--data-dir DATA_DIR]

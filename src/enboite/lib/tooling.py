@@ -304,6 +304,7 @@ def spawn(
             "--data-dir", tmp,
             "--disable-tools", "spawn",
             "--plain",
+            "--no-color",
             "--prompt", _prompt + "\n"*2 + task,
         ]
         process = subprocess.Popen(
@@ -1127,6 +1128,9 @@ def FS_ls(
     - only: Specify an extension to only display files that have it (txt, jpg, md).
     """
     _path = _request_fs_elevation(path)
+    
+    if not _path.is_dir():
+        raise FileNotFoundError("non-existent or not a directory")
     
     results: list[str] = []
     for i in list(Path(_path).glob("*")):

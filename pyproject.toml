@@ -27,12 +27,17 @@ dependencies = [
     "opencv-python-headless", "numpy",
     "humanize",
     "prompt-toolkit",
-    "pymupdf"
+    "pymupdf",
+    "openai",
+    "httpx2[socks]"
 ]
 
 [project.optional-dependencies]
 ssh = [
     "paramiko"
+]
+litellm = [
+    "litellm==1.105.1"
 ]
 full = [
     "sounddevice",

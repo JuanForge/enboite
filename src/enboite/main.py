@@ -5,13 +5,17 @@ import importlib.resources
 import io
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from io import BytesIO
 
 import prompt_toolkit
 import prompt_toolkit.history
+
+from enboite.lib.llm import types
 
 sd = sf = None
 try:
@@ -28,15 +32,17 @@ import shutil
 from pathlib import Path
 
 import tomlkit
+from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.text import Text
 from tqdm import tqdm
 
-from enboite.lib import TTS, llm, tooling
+from enboite.lib import TTS, tooling
 from enboite.lib import color as c
 from enboite.lib import tooling as t
+from enboite.lib.llm import session as llm_session
 
 
 def clear_tmp(folder: str):
@@ -90,14 +96,13 @@ def loadConfig(x: str):
 
 
 def _main(
-    model: str|None,
+    model: str,
+    llm_backend: str,
     prompt: str|None,
     save_chat: bool,
-    thinking: bool,
     limit_content_size: int | None,
     dbg_tools: bool,
     llm_ctx: int|None,
-    endpoint: str,
     proxy: str|None,
     android: bool,
     prompt_file: None|str,
@@ -106,9 +111,14 @@ def _main(
     enable_tools: list[str],
     disable_tools: list[str],
     no_tools: bool,
-    plain: bool
+    plain: bool,
+    api_base: str,
+    no_system_prompt: bool,
+    reasoning_effort: str|None,
+    no_color: bool,
+    seed: int|None
 ) -> None:
-    if plain:
+    if no_color:
         c.no_color()
     
     if prompt_file:
@@ -152,21 +162,22 @@ def _main(
             if dbg_tools: print(f"{c.YELLOW}not use   : {func_name} {c.RESET}")
     if dbg_tools:  print("="* 40)
     
-    # save_chat_file = os.path.join(str(t.BASE_BASE), "chat.log.bin")
     
     tools = tooling._build_v2(tools)
     if dbg_tools:
         print(json.dumps(tools, indent=4))
     
-    session = llm.client(
-        model or "qwen3:14b" or "qwen3.8:27b",  # noqa: SIM222
-        think=thinking,
-        num_ctx=llm_ctx,
+    session = llm_session.client(
+        model,
+        reasoning_effort=reasoning_effort,
+        # pyrefly: ignore[bad-argument-type]
+        backend=llm_backend,
+        ctx=llm_ctx,
         tools=tools,
-        system_prompt=_prompt(open(str(importlib.resources.files("enboite").joinpath("prompt.md")), "r", encoding="utf-8").readlines()),  # noqa: SIM115
-        keep_alive="20m",
-        endpoint=endpoint,
-        proxy=proxy
+        system_prompt="" if no_system_prompt else _prompt(open(str(importlib.resources.files("enboite").joinpath("prompt.md")), "r", encoding="utf-8").readlines()),  # noqa: SIM115
+        api_base=api_base,
+        proxy=proxy,
+        seed=seed
     )
     t.SESSION_LLM = session
     
@@ -196,10 +207,15 @@ def _main(
             
             chats.append(("<new>", "< Make a new chat >"))
             
-            result = prompt_toolkit.shortcuts.choice(
+            selector = ChoiceInput(
                 message="Select a chat history.",
                 options=chats,
             )
+            
+            app = selector._create_application()
+            app.erase_when_done = True
+            
+            result = app.run()
             if result == "<new>":
                 save_chat_file_base = os.path.join(
                     t.BASE_BASE,
@@ -227,7 +243,7 @@ def _main(
     _max_size_thinking = 500
     _max_size_tools = 500
     
-    TTS_time = 1.5
+    TTS_time = 1.5  # noqa: F841
     
     live = None
     input_stdin = prompt_toolkit.PromptSession(
@@ -236,7 +252,7 @@ def _main(
     try:
         while True:
             _input = input_stdin(">").strip() if not prompt else prompt
-            TTS_last = time.monotonic()
+            TTS_last = time.monotonic()  # noqa: F841
             TTS_chunk = ""
             live = Live(
                 "",
@@ -252,34 +268,34 @@ def _main(
             if len(str(_input)) > 0 and not _input.startswith("/"):
                 try:
                     for chunk in session.generate(_input):
-                        if chunk["type"] == "content":
+                        if isinstance(chunk, types.StreamContent):
                             if TTS.status():
-                                TTS_chunk += chunk["content"]
+                                TTS_chunk += chunk.content
                             
-                            content += chunk["content"]
+                            content += chunk.content
                             thinking_data = ""
                             if limit_content_size:
                                 content = content[-limit_content_size:]
                         
-                        elif chunk["type"] == "thinking":
-                            thinking_data += chunk["content"]
+                        elif isinstance(chunk, types.StreamReasoning):
+                            thinking_data += chunk.content
                             thinking_data = thinking_data[-_max_size_thinking:]
                         
-                        elif chunk["type"] == "tool":
-                            tools_data += f'{chunk["function"]}\n'
+                        elif isinstance(chunk, types.StreamToolCall):
+                            tools_data += f'{chunk}\n'
                             tools_data = tools_data[-_max_size_tools:]
                         
-                        elif chunk["type"] in ("done", "refresh"):
+                        elif isinstance(chunk, types.StreamDone):
                             pass
                         
                         else:
-                            raise RuntimeError(f"invalid type : {chunk["type"]}")
+                            raise TypeError(f"invalid type : {chunk}")
                         
-                        if TTS.status() and (chunk["type"] == "done" or (time.monotonic()-TTS_time> TTS_last and len(chunk["type"]) >= 20) ):  # noqa: SIM102
-                            if TTS_chunk:
-                                speaker(TTS.TTSgen(TTS_chunk))
-                                TTS_chunk = ""
-                                TTS_last = time.monotonic()
+                        # if TTS.status() and (chunk["type"] == "done" or (time.monotonic()-TTS_time> TTS_last and len(chunk["type"]) >= 20) ):  # noqa: RUF100, SIM102
+                        #     if TTS_chunk:
+                        #         speaker(TTS.TTSgen(TTS_chunk))
+                        #         TTS_chunk = ""
+                        #         TTS_last = time.monotonic()
                         
                         bar_io = io.StringIO()
                         bar = tqdm(
@@ -309,10 +325,23 @@ def _main(
                     if save_chat:
                         with open(save_chat_file, "wb") as f:
                             f.write(session.export())
+            elif _input == "/tools":
+                rich_console.print(json.dumps(session.tools, indent=4))
             elif _input == "/log":
                 rich_console.print(json.dumps(session.messages, indent=4))
             elif _input == "/think":
                 session.think = not session.think
+            elif _input == "/exec":
+                with tempfile.NamedTemporaryFile(mode="r+", encoding="utf-8") as tmp:
+                    process = subprocess.Popen(
+                        ["script", "-qef", "-c", os.environ.get("SHELL", "/bin/sh"), tmp.name]
+                    )
+                    live.stop()
+                    process.wait()
+                    live.start()
+                    
+                    tmp.seek(0)
+                    session.add(role="user", content=tmp.read())
             elif _input == "/clear":
                 session.clear()
                 session.total_token = 0
@@ -332,6 +361,7 @@ def _main(
 
 
 def main():
+    API_BASE = "http://localhost:11434"
     parser = argparse.ArgumentParser(
         prog="EnBoite",
         description="Give your AI agent full control over a system through SSH.",
@@ -339,8 +369,26 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default=None,
+        default="lfm3:1.7b-256k",
         help="Name of the local LLM model to use."
+    )
+    parser.add_argument(
+        "--llm-backend",
+        metavar="BACKEND",
+        default="openai",
+        help="LLM backend implementation to use.",
+        type=str
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=None,
+        choices=(
+            "none", "minimal", "low",
+            "medium", "high", "max",
+            "xhigh", "adaptive"
+        ),
+        help="Sets the model's reasoning effort.",
     )
     parser.add_argument(
         "--prompt",
@@ -353,6 +401,11 @@ def main():
         help="Path to a file containing the prompt text."
     )
     parser.add_argument(
+        "--seed",
+        default=None,
+        type=int
+    )
+    parser.add_argument(
         "--data-dir",
         default=None,
         type=str,
@@ -361,12 +414,17 @@ def main():
     parser.add_argument(
         "--thinking",
         action="store_true",
-        help="Enable the model's reasoning."
+        help="Enable the model's reasoning.",
+        default=None
     )
     parser.add_argument(
         "--no-save-chat",
         action="store_true",
         help="Do not save the conversation history to disk."
+    )
+    parser.add_argument(
+        "--no-system-prompt",
+        action="store_true"
     )
     parser.add_argument(
         "--limit-content-size",
@@ -377,7 +435,7 @@ def main():
     parser.add_argument(
         "--ctx",
         type=int,
-        default=2048,
+        default=256000,
         help="Size of the model's context window."
     )
     parser.add_argument(
@@ -409,9 +467,9 @@ def main():
         help="Print the full tool schema (JSON) for debugging."
     )
     parser.add_argument(
-        "--endpoint",
-        default="http://127.0.0.1:11434",
-        help="Base URL of the LLM API endpoint (default: http://127.0.0.1:11434)."
+        "--api-base",
+        default=None,
+        help="Base URL of the LLM API (default: http://127.0.0.1:11434/v1)."
     )
     parser.add_argument(
         "--proxy",
@@ -427,25 +485,39 @@ def main():
         "--plain",
         action="store_true"
     )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        default=False
+    )
     args = parser.parse_args()
+    
+    if args.llm_backend != "native":
+        API_BASE += "/v1"
+    
+    if args.api_base is None:
+        args.api_base = API_BASE
     
     _main(
         prompt=args.prompt,
         save_chat=not args.no_save_chat,
         dbg_tools=args.dbg_tools,
-        thinking=args.thinking,
         limit_content_size=args.limit_content_size,
         llm_ctx=args.ctx,
         model=args.model,
-        endpoint=args.endpoint,
         proxy=args.proxy,
         android=args.android,
         prompt_file=args.prompt_file,
         non_interactive=args.non_interactive,
         data_dir=args.data_dir,
-        #config=args.config
         enable_tools=args.enable_tools,
         disable_tools=args.disable_tools,
         no_tools=args.no_tools,
-        plain=args.plain
+        plain=args.plain,
+        api_base=args.api_base,
+        no_system_prompt=args.no_system_prompt,
+        llm_backend=args.llm_backend,
+        reasoning_effort=args.reasoning_effort,
+        no_color=args.no_color,
+        seed=args.seed
     )
