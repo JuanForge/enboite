@@ -1,4 +1,6 @@
+import json
 from collections.abc import Iterator
+from copy import deepcopy
 from typing import Any
 
 import requests
@@ -11,6 +13,7 @@ try:
 except ImportError:
     import json as _json
 
+
 def completion(
     model: str,
     messages: list[dict[Any, Any]],
@@ -21,6 +24,14 @@ def completion(
     proxy: str|None = None,
     seed: int|None = None
 ) -> Iterator[types.StreamEvent]:
+    
+    _messages = deepcopy(messages)
+    
+    for message in _messages:
+        for tool_call in message.get("tool_calls", []):
+            if type(tool_call["function"]["arguments"]) is str:
+                arguments = tool_call["function"]["arguments"]
+                tool_call["function"]["arguments"] = json.loads(arguments)
     
     http = requests.Session()
     http.headers.update({
@@ -51,7 +62,7 @@ def completion(
         f"{api_base}/api/chat",
         json={
             "model": model,
-            "messages": messages,
+            "messages": _messages,
             "stream": True,
             **kwargs
         },
@@ -79,12 +90,10 @@ def completion(
         if calls := message.get("tool_calls"):
             for i in calls:
                 yield types.StreamToolCall(
-                    index=i.index,
-                    id=i.function.id,
-                    # pyrefly: ignore[missing-attribute]
-                    function=i.function.name,
-                    # pyrefly: ignore[missing-attribute]
-                    arguments=i.arguments,
+                    index=i["function"]["index"],
+                    id=i["id"],
+                    function=i["function"]["name"],
+                    arguments=i["function"]["arguments"],
                 )
         
         if data.get("done"):
