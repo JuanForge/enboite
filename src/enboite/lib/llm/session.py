@@ -68,7 +68,7 @@ class client:
         self.timeout = timeout
         self.messages: list[dict[Any, Any]] = []
         self.total_token = 0
-        self.token_per_sec = 0
+        self.token_per_sec = 0.0
         self._systemPrompt()
         self.printError = printError
         self.estimation_tokenization_factor: float = 0

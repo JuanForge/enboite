@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -53,14 +54,23 @@ def completion(
         },
         **kwargs,
     )
+    
+    completion_tokens = 0
+    start_time = None
+    end_time = None
     total_tokens = 0
+    
     finish_reason = None
     for chunk in stream:
         if chunk.usage is not None:
             total_tokens = chunk.usage.total_tokens
+            completion_tokens = chunk.usage.completion_tokens
         
         if not chunk.choices:
             continue
+        
+        if start_time is None:
+            start_time = time.perf_counter()
         
         choice = chunk.choices[0]
         delta = choice.delta
@@ -94,9 +104,16 @@ def completion(
                 )
         
         if choice.finish_reason:
+            end_time = time.perf_counter()
             finish_reason = str(choice.finish_reason)
+    
+    total_time = 0
+    if start_time and end_time:
+        total_time = end_time - start_time
     
     yield types.StreamDone(
         str(finish_reason),
+        time=total_time,
+        completion_tokens=completion_tokens,
         total_tokens=total_tokens
     )

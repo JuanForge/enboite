@@ -286,7 +286,7 @@ def _main(
                             tools_data = tools_data[-_max_size_tools:]
                         
                         elif isinstance(chunk, types.StreamDone):
-                            pass
+                            session.token_per_sec = chunk.completion_tokens / chunk.time
                         
                         else:
                             raise TypeError(f"invalid type : {chunk}")
@@ -363,7 +363,7 @@ def _main(
 def main():
     API_BASE = "http://localhost:11434"
     parser = argparse.ArgumentParser(
-        prog="EnBoite",
+        prog="enboite",
         description="Give your AI agent full control over a system through SSH.",
         allow_abbrev=False
     )

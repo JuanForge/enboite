@@ -23,6 +23,8 @@ class StreamToolCall:
 @dataclass(frozen=True, slots=True)
 class StreamDone:
     content: str
+    time: float = 0.0
+    completion_tokens: int = 0
     total_tokens: int = 0
 
 type StreamEvent = (
