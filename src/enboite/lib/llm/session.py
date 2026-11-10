@@ -74,6 +74,7 @@ class client:
         self.estimation_tokenization_factor: float = 0
         self.last_time_add = 0.0
         self.spike_char = 0
+        self.proxy = proxy
     
     def add(self, role: str, content: str) -> None:
         self.messages.append(
@@ -138,7 +139,8 @@ class client:
             tools=self.tools,
             api_base=self.api_base,
             api_key=self.api_key,
-            seed=self.seed
+            seed=self.seed,
+            proxy=self.proxy
         )
         self.messages.append({"role": "assistant", "content": ""})
         for chunk in _:
